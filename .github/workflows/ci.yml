@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check
+      - run: ruff format --check
+
+  # Fills the cache once for the whole matrix, so one slow response does not fail a dozen jobs
+  tokenizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -e .
+      - uses: actions/cache@v6
+        with:
+          path: tokenizers
+          key: tokenizers-${{ hashFiles('src/nai_cli/tokenizer.py') }}
+          enableCrossOsArchive: true
+      - run: python .github/scripts/tokenizers.py download tokenizers
+
+  test:
+    needs: tokenizers
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        # Windows and macOS minutes cost more, and the middle versions rarely differ there from Linux
+        exclude:
+          - os: windows-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.12"
+          - os: macos-latest
+            python: "3.13"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      # The tests compare against the official tokenizer files and skip that check without them
+      - uses: actions/cache/restore@v6
+        with:
+          path: tokenizers
+          key: tokenizers-${{ hashFiles('src/nai_cli/tokenizer.py') }}
+          enableCrossOsArchive: true
+      # Downloads only when the cache is gone, as on a re-run days later
+      - run: python .github/scripts/tokenizers.py download tokenizers
+      - run: python .github/scripts/tokenizers.py install tokenizers
+      - run: pytest
+      # Runs the installed command as a user would, in a throwaway home on each system
+      - run: python .github/scripts/smoke.py tokenizers
