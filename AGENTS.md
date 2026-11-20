@@ -11,7 +11,7 @@ ruff check
 ruff format
 ```
 
-Run all of them before finishing a change. CI runs the same checks in 7 combinations: Linux with Python 3.11 to 3.14, Windows with 3.11 and 3.14, and macOS with 3.14. Each also runs `python .github/scripts/smoke.py tokenizers`, which calls the installed `nai` once per offline feature in a throwaway home with the network blocked; add a case there for a new command.
+Run all of them before finishing a change. CI runs the same checks on Linux, Windows and macOS, each with Python 3.11 to 3.14. Each also runs `python .github/scripts/smoke.py tokenizers`, which calls the installed `nai` once per offline feature in a throwaway home with the network blocked; add a case there for a new command.
 
 ## Rules
 
