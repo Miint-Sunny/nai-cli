@@ -33,9 +33,12 @@ def untagged() -> list[dict]:
 
 @pytest.fixture(autouse=True)
 def isolated_dirs(tmp_path, monkeypatch):
-    """Keep config, ledger and cache in a temporary directory."""
+    """Keep config, ledger, cache and images in a temporary directory."""
     monkeypatch.delenv(config.TOKEN_ENV, raising=False)
     for name, folder in (
+        # Images default to Pictures under the home folder on macOS
+        ("HOME", "home"),
+        ("USERPROFILE", "home"),
         ("APPDATA", "config"),
         ("XDG_CONFIG_HOME", "config"),
         ("LOCALAPPDATA", "local"),

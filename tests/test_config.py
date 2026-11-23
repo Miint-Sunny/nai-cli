@@ -1,6 +1,7 @@
 """The config file: defaults, accounts' tokens hidden, values refused and the folders it lives in."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,24 @@ def test_no_home_folder_needs_the_folder_variables(capsys, monkeypatch):
         monkeypatch.setenv(name, "")
     code, out = run(capsys, "config")
     assert code == 1 and out["code"] == "config_missing" and "home folder" in out["message"]
+
+
+def test_default_image_folder(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    # Finder hides the data directory, so images go to Pictures on macOS
+    assert config.default_output_dir() == home / "Pictures" / "nai-cli"
+    # Images already in the data directory stay together
+    legacy = home / ".local" / "share" / "nai-cli" / "images"
+    legacy.mkdir(parents=True)
+    assert config.default_output_dir() == legacy
+    # A data directory chosen with XDG_DATA_HOME keeps the images too
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert config.default_output_dir() == tmp_path / "xdg" / "nai-cli" / "images"
+    monkeypatch.delenv("XDG_DATA_HOME")
+    legacy.rmdir()
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert config.default_output_dir() == legacy

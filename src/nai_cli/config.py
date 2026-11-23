@@ -28,7 +28,7 @@ novelai_token = ""
 # api_url = "https://relay.example.com"
 
 [output]
-# Where images are saved; empty means images/ under the data directory
+# Where images are saved; empty means images/ under the data directory, or ~/Pictures/nai-cli on macOS
 dir = ""
 # Folders under dir in the same syntax as filename, such as "{year}/{month}" or "{model}"; empty saves in dir
 folder = "{date}"
@@ -139,12 +139,27 @@ def data_dir() -> Path:
     return _base("XDG_DATA_HOME", ".local", "share") / "nai-cli"
 
 
+def default_output_dir() -> Path:
+    """Where images are saved when [output] dir is empty. Finder hides the data directory, so on macOS they go
+    to the Pictures folder, unless XDG_DATA_HOME chooses the data directory or it already holds images."""
+    images = data_dir() / "images"
+    if sys.platform != "darwin" or _variable("XDG_DATA_HOME") or images.is_dir():
+        return images
+    return _home("Pictures", "nai-cli", variable="[output] dir")
+
+
 def _base(variable: str, *under_home: str) -> Path:
     """The folder a variable names, else the usual one under the home folder. An empty or relative value is
     ignored, as the XDG specification says, and the home folder is only looked up when needed."""
-    value = os.environ.get(variable, "")
-    if value and Path(value).is_absolute():
-        return Path(value)
+    return _variable(variable) or _home(*under_home, variable=variable)
+
+
+def _variable(name: str) -> Path | None:
+    value = os.environ.get(name, "")
+    return Path(value) if value and Path(value).is_absolute() else None
+
+
+def _home(*under_home: str, variable: str) -> Path:
     try:
         return Path.home().joinpath(*under_home)
     except RuntimeError as e:
@@ -256,7 +271,7 @@ def _output_dir(raw: dict[str, Any], path: Path) -> Path:
     value = _table(raw, "output", path).get("dir", "")
     if not isinstance(value, str):
         raise errors.NaiError(errors.CONFIG_MISSING, f"{path}: [output] dir must be a string: {value!r}")
-    return values.path(value or data_dir() / "images")
+    return values.path(value or default_output_dir())
 
 
 def _local(raw: dict[str, Any], path: Path) -> LocalModels:
