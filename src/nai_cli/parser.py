@@ -200,13 +200,16 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser(
         "strip", help="save copies of images without generation settings, EXIF or stealth data, for sharing"
     )
-    st.add_argument("images", nargs="+", type=values.path, metavar="IMAGE")
+    st.add_argument(
+        "images", nargs="+", type=values.path, metavar="IMAGE", help="images, or folders for the images inside them"
+    )
     st.add_argument(
         "-o",
         "--output",
         metavar="PATH",
         help="a .png name for one image, or a folder (default: NAME_clean.png in the output folder)",
     )
+    st.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
 
     rd = sub.add_parser("redact", help="save copies of images with regions pixelated, blurred or filled, for sharing")
     _add_copy_args(rd, "redacted")
@@ -384,13 +387,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_copy_args(p: argparse.ArgumentParser, label: str) -> None:
-    p.add_argument("images", nargs="+", type=values.path, metavar="IMAGE")
+    p.add_argument(
+        "images", nargs="+", type=values.path, metavar="IMAGE", help="images, or folders for the images inside them"
+    )
     p.add_argument(
         "-o",
         "--output",
         metavar="PATH",
         help=f"a .png name for one image, or a folder (default: NAME_{label}.png in the output folder)",
     )
+    p.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
     p.add_argument(
         "--keep-metadata",
         action=SWITCH,

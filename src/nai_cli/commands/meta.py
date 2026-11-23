@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from nai_cli import errors, fs, ledger, meta, rerun
+from nai_cli.commands import sources
 from nai_cli.commands.context import LINES_IN_JOB, Context
 
 # What a folder is searched for: the formats the official client writes settings into
@@ -21,18 +22,11 @@ class MetaSettings:
 
 
 def resolve(opts: dict[str, Any], ctx: Context) -> MetaSettings:
-    images: list[Path] = []
-    folders = False
-    for given in map(Path, opts["image"]):
-        if fs.is_folder(given):
-            folders = True
-            pattern = "**/*" if opts.get("recursive") else "*"
-            images.extend(
-                sorted(p for p in given.glob(pattern) if p.suffix.lower() in IMAGE_SUFFIXES and fs.is_file(p))
-            )
-        else:
-            images.append(given)
-    lines = bool(opts.get("jsonl")) or folders or len(images) > 1
+    given = tuple(map(Path, opts["image"]))
+    found = sources.expand(given, IMAGE_SUFFIXES, bool(opts.get("recursive")))
+    images = tuple(source.path for source in found)
+    # A folder prints lines even when it holds no image
+    lines = bool(opts.get("jsonl")) or any(fs.is_folder(p) for p in given) or len(images) > 1
     return MetaSettings(tuple(images), bool(opts.get("raw")), lines, bool(ctx.config.defaults.get("v5_hidden_options")))
 
 
