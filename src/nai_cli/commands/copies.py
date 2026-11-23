@@ -107,22 +107,22 @@ def color(text: str | None, default: tuple[int, int, int]) -> tuple[int, int, in
 
 
 def finish(source: Path, edited: Image.Image, keep_metadata: bool, warnings: list[str]) -> bytes:
-    """The edited pixels as a bare PNG; with keep_metadata, the source's PNG text is carried over as it is. Settings
-    it keeps in EXIF or in the alpha channel, which the edit loses, are written as text in place of PNG text of the
-    same keywords, so the copy reads back as the source did."""
+    """The edited pixels as a bare PNG; with keep_metadata, the source's settings are carried over: its PNG text as
+    it is when they are read from there, otherwise, from EXIF or the alpha channel, as text in place of PNG text of
+    the same keywords, so the copy reads back as the source did."""
     out = images.strip_metadata(edited)
     if not keep_metadata:
         return out
     data = source.read_bytes()
     try:
-        settings = meta.raw_of(data, source.name)
+        layers = meta.layers_of(data, source.name)
     except errors.NaiError:
-        settings = {}
-    if not settings or "Comment" in meta.png_text_chunks(data):
-        # The settings are the PNG text itself, or there are none
+        # No settings, or none readable: whatever text there is, is not theirs
         return images.copy_text_chunks(data, out)
-    out = images.copy_text_chunks(data, out, leaving=set(settings))
-    return images.add_text(out, _writable(settings, source.name, warnings))
+    if layers.used == meta.PNG_TEXT:
+        return images.copy_text_chunks(data, out)
+    out = images.copy_text_chunks(data, out, leaving=set(layers.settings))
+    return images.add_text(out, _writable(layers.settings, source.name, warnings))
 
 
 def _writable(settings: dict[str, str], name: str, warnings: list[str]) -> dict[str, str]:

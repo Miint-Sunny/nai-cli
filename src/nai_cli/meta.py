@@ -7,6 +7,7 @@ import struct
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -55,6 +56,43 @@ _V4_SOURCES = {
     "NovelAI Diffusion V4 770A9E12": "nai-diffusion-4-curated-preview",
 }
 
+# The copies of the settings an image keeps, as nai meta names them; the text is PNG text or, without it, EXIF
+PNG_TEXT, EXIF, STEALTH = "png_text", "exif", "stealth"
+# Compared between the copies; Software and Source only name the tool and the model that wrote a copy
+_COMPARED = ("Description", "Generation time")
+
+
+class Layer(Enum):
+    """A copy of the settings that --layer reads alone: the text, which is the PNG text or the EXIF, or the alpha."""
+
+    TEXT = "text"
+    STEALTH = "stealth"
+
+
+@dataclass(frozen=True)
+class Layers:
+    """The copies of the settings an image keeps, by name and with the text first, and the one its settings come
+    from."""
+
+    found: dict[str, dict[str, str]]
+    used: str
+    # The keys on which the text and the stealth data disagree; None where the image keeps but one of them
+    differences: list[str] | None
+    # The copy --layer names, which `used` is whatever the other copy holds
+    asked: Layer | None = None
+
+    @property
+    def settings(self) -> dict[str, str]:
+        return self.found[self.used]
+
+    @property
+    def signed(self) -> list[str]:
+        """The copies whose Comment holds a signed_hash, which is not checked against the settings."""
+        return [name for name, found in self.found.items() if _signed(found["Comment"])]
+
+    def to_json(self) -> dict[str, Any]:
+        return {"found": list(self.found), "signed": self.signed, "used": self.used, "differences": self.differences}
+
 
 def png_text_entries(data: bytes) -> list[tuple[str, str]]:
     """Every tEXt, iTXt and zTXt chunk as (keyword, text), in file order."""
@@ -63,18 +101,17 @@ def png_text_entries(data: bytes) -> list[tuple[str, str]]:
         try:
             if kind == b"tEXt":
                 key, value = body.split(b"\0", 1)
-                out.append((key.decode("latin1"), value.decode("utf-8", "replace")))
+                out.append((key.decode("latin1"), _utf8(value)))
             elif kind == b"iTXt":
                 key, rest = body.split(b"\0", 1)
                 compressed = rest[0]
                 rest = rest[2:]
                 _, rest = rest.split(b"\0", 1)
                 _, text = rest.split(b"\0", 1)
-                text = decode.inflate(text) if compressed else text
-                out.append((key.decode("latin1"), text.decode("utf-8", "replace")))
+                out.append((key.decode("latin1"), _utf8(decode.inflate(text) if compressed else text)))
             elif kind == b"zTXt":
                 key, rest = body.split(b"\0", 1)
-                out.append((key.decode("latin1"), decode.inflate(rest[1:]).decode("utf-8", "replace")))
+                out.append((key.decode("latin1"), _utf8(decode.inflate(rest[1:]))))
         except (ValueError, IndexError):
             continue
     return out
@@ -166,22 +203,41 @@ def read_raw(path: str | Path) -> dict[str, str]:
 
 
 def raw_of(data: bytes, name: str) -> dict[str, str]:
-    """The settings an image's bytes keep, from PNG text, EXIF or the alpha channel; bytes that are no image are
+    """The settings an image's bytes keep, from the copy layers_of settles on; bytes that are no image are
     refused, not taken for an image without settings."""
-    chunks = png_text_chunks(data)
-    if "Comment" in chunks:
-        return chunks
-    try:
-        with Image.open(io.BytesIO(data)) as img:
-            found = exif_text(img)
-            if "Comment" not in found:
-                img.load()
-                found = stealth_text(img)
-    except decode.BAD_IMAGE as e:
-        raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {name}: {e}") from e
-    if "Comment" in found:
-        return found
-    raise errors.NaiError(errors.NO_METADATA, f"{name} has no NovelAI generation settings")
+    return layers_of(data, name).settings
+
+
+def layers_of(data: bytes, name: str, only: Layer | None = None) -> Layers:
+    """The copies of the settings an image's bytes keep and the one its settings are read from; bytes that are no
+    image are refused, not taken for an image without settings."""
+    found, _ = _copies(data, name)
+    return _layers(found, name, only)
+
+
+def read_checked(path: str | Path, only: Layer | None = None) -> tuple[Layers, bool | None]:
+    """The copies of the settings an image file keeps, and whether every pixel of it decodes, None for an image
+    too large to decode in full. Settings kept before a file was cut off are still read."""
+    path = Path(path)
+    found, intact = _copies(_bytes(path), path.name)
+    return _layers(found, path.name, only), intact
+
+
+def layer_warnings(layers: Layers) -> list[str]:
+    """Why the settings come from the copy they do, when the text and the stealth data disagree."""
+    if not layers.differences:
+        return []
+    text = next(name for name in layers.found if name != STEALTH)
+    if layers.asked is not None:
+        why = "as --layer asks"
+    elif layers.used == STEALTH:
+        why = "the only copy NovelAI signed"
+    else:
+        why = "as the text is used unless the stealth data alone is signed"
+    return [
+        f"the {text} and the stealth data disagree on {', '.join(layers.differences)}; the settings come from "
+        f"{layers.used}, {why}"
+    ]
 
 
 def _stored_vibes(encodings: Any) -> int:
@@ -233,19 +289,107 @@ def parse(path: str | Path) -> dict[str, Any]:
     return parse_raw(read_raw(path))
 
 
-def parse_checked(path: str | Path) -> tuple[dict[str, Any], bool | None]:
-    """The settings, and whether every pixel decodes, None for an image too large to decode in full; settings kept
-    before a file was cut off are still read."""
-    path = Path(path)
-    data = _bytes(path)
-    record = parse_raw(raw_of(data, path.name))
+def _utf8(data: bytes) -> str:
+    """Chunk text as UTF-8 where it is valid, as other tools write tEXt, and with any other byte as Latin-1: PNG
+    defines tEXt as Latin-1, and NovelAI writes it so, a no-break space as one byte, 0xA0."""
+    return "".join(
+        chr(ord(ch) - 0xDC00) if 0xDC80 <= ord(ch) <= 0xDCFF else ch for ch in data.decode("utf-8", "surrogateescape")
+    )
+
+
+def _copies(data: bytes, name: str) -> tuple[dict[str, dict[str, str]], bool | None]:
+    """The copies of the settings in the image bytes, the text first, and whether every pixel decodes: None for an
+    image too large to decode in full. The text is read without the pixels, so the settings a file keeps before it
+    is cut off are still found. Bytes that are no image are refused, not taken for an image without settings."""
+    found: dict[str, dict[str, str]] = {}
+    chunks = png_text_chunks(data)
+    if "Comment" in chunks:
+        found[PNG_TEXT] = chunks
     try:
-        decode.verify(data)
-    except Image.DecompressionBombError:
-        return record, None
-    except decode.BAD_IMAGE:
-        return record, False
-    return record, True
+        with Image.open(io.BytesIO(data)) as img:
+            if not found:
+                exif = exif_text(img)
+                if "Comment" in exif:
+                    found[EXIF] = exif
+            img.load()
+            stealth = stealth_text(img)
+    except decode.BAD_IMAGE as e:
+        if not found:
+            raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {name}: {e}") from e
+        # Past the pixel limit is past the stealth limit too, so no copy was missed
+        return found, None if isinstance(e, Image.DecompressionBombError) else False
+    if "Comment" in stealth:
+        found[STEALTH] = stealth
+    if not found:
+        raise errors.NaiError(errors.NO_METADATA, f"{name} has no NovelAI generation settings")
+    return found, True
+
+
+def _layers(found: dict[str, dict[str, str]], name: str, only: Layer | None) -> Layers:
+    """Which of the copies found the settings come from: the text, unless it disagrees with stealth data that alone
+    is signed, which means the text was changed after NovelAI wrote it. A copy --layer names is used as it is, and
+    without it the image has no settings."""
+    text = next((copy for copy in found if copy != STEALTH), None)
+    if (only is Layer.STEALTH and STEALTH not in found) or (only is Layer.TEXT and text is None):
+        where = "the alpha channel" if only is Layer.STEALTH else "PNG text or EXIF"
+        raise errors.NaiError(errors.NO_METADATA, f"{name} has no NovelAI generation settings in {where}")
+    differences = None
+    used = text or STEALTH
+    if text is not None and STEALTH in found:
+        differences = _differences(found[text], found[STEALTH])
+        if only is None and differences and _signed(found[STEALTH]["Comment"]) and not _signed(found[text]["Comment"]):
+            used = STEALTH
+    if only is Layer.STEALTH:
+        used = STEALTH
+    return Layers(found, used, differences, only)
+
+
+def _signed(comment: str) -> bool:
+    settings = _settings_of(comment)
+    return bool(settings and settings.get("signed_hash"))
+
+
+def _settings_of(comment: str) -> dict[str, Any] | None:
+    try:
+        settings = values.parse_json(comment)
+    except ValueError:
+        return None
+    return settings if isinstance(settings, dict) else None
+
+
+def _differences(text: dict[str, str], stealth: dict[str, str]) -> list[str]:
+    """The keys on which two copies of the settings disagree. Title is the text's alone, Software and Source only
+    name the tool and the model that wrote a copy, signed_hash is signed separately in each, and a key that one
+    copy alone holds, such as the Vibes the alpha channel leaves out, is no difference."""
+    out = [
+        key
+        for key in _COMPARED
+        if key in text and key in stealth and _without_nuls(text[key]) != _without_nuls(stealth[key])
+    ]
+    a, b = (_settings_of(copy["Comment"]) for copy in (text, stealth))
+    if a is None or b is None:
+        # Not both hold a JSON object: all they can be compared on is the text itself
+        return out if _without_nuls(text["Comment"]) == _without_nuls(stealth["Comment"]) else [*out, "Comment"]
+    out += [
+        f"Comment.{key}"
+        for key in sorted(a)
+        if key != "signed_hash"
+        and a[key] is not None
+        and b.get(key) is not None
+        and _without_nuls(a[key]) != _without_nuls(b[key])
+    ]
+    return out
+
+
+def _without_nuls(value: Any) -> Any:
+    """value with the NULs gone that NovelAI writes before the description of a WebP image."""
+    if isinstance(value, str):
+        return value.replace("\0", "")
+    if isinstance(value, dict):
+        return {key: _without_nuls(v) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_without_nuls(v) for v in value]
+    return value
 
 
 def _bytes(path: Path) -> bytes:

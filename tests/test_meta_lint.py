@@ -152,6 +152,13 @@ def test_itxt_and_ztxt_chunks():
     assert meta.png_text_chunks(png) == {"Comment": "内容", "K": "v"}
 
 
+def test_text_chunk_bytes_that_are_not_utf8_are_latin1():
+    # Valid UTF-8 in a tEXt chunk is read as UTF-8, as other tools write it, and a byte that is not as Latin-1, as
+    # PNG defines tEXt: NovelAI writes a no-break space as one byte, 0xA0
+    png = b"\x89PNG\r\n\x1a\n" + decode.png_chunk(b"tEXt", b"Description\0" + "猫, a".encode() + b"\xa0b")
+    assert meta.png_text_chunks(png) == {"Description": "猫, a\u00a0b"}
+
+
 @pytest.mark.parametrize(
     "text,code",
     [
@@ -375,7 +382,7 @@ def test_meta_of_several_images_prints_lines(capsys, tmp_path):
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert code == 0 and [line["type"] for line in lines] == ["image", "image", "summary"]
     assert lines[0]["seed"] == 1 and lines[0]["image"].endswith("a.png") and lines[1]["code"] == "no_metadata"
-    assert lines[-1]["meta"] == {"images": 2, "without_settings": 1, "damaged": 0, "failed": 0}
+    assert lines[-1]["meta"] == {"images": 2, "without_settings": 1, "damaged": 0, "failed": 0, "layers_differ": 0}
     code = cli.main(["meta", str(folder / "a.png"), str(folder / "gone.png")])
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert code == 1 and lines[1]["code"] == "bad_args" and lines[-1]["meta"]["failed"] == 1
@@ -650,7 +657,13 @@ def test_a_folder_scan_counts_unreadable_images_as_failed(capsys, tmp_path):
     code = cli.main(["meta", str(folder)])
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     summary = lines[-1]
-    assert code == 1 and summary["meta"] == {"images": 2, "without_settings": 1, "damaged": 0, "failed": 1}
+    assert code == 1 and summary["meta"] == {
+        "images": 2,
+        "without_settings": 1,
+        "damaged": 0,
+        "failed": 1,
+        "layers_differ": 0,
+    }
 
 
 def test_settings_of_another_shape_are_unreadable_settings_in_every_reader(capsys, tmp_path):
@@ -667,7 +680,13 @@ def test_settings_of_another_shape_are_unreadable_settings_in_every_reader(capsy
         with_comment(folder / name, comment)
     code = cli.main(["meta", str(folder)])
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert code == 0 and lines[-1]["meta"] == {"images": 5, "without_settings": 5, "damaged": 0, "failed": 0}
+    assert code == 0 and lines[-1]["meta"] == {
+        "images": 5,
+        "without_settings": 5,
+        "damaged": 0,
+        "failed": 0,
+        "layers_differ": 0,
+    }
     assert all(line["type"] == "image" and line["code"] == "no_metadata" for line in lines[:-1])
     for name in shapes:
         code, out = run(capsys, "gen", "--from-image", str(folder / name), "--dry-run")

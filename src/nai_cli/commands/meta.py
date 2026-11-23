@@ -18,6 +18,8 @@ class MetaSettings:
     # One JSON line per image and a summary, even for a single image
     lines: bool
     hidden_options: bool
+    # --layer: one copy of the settings only, the text or the alpha channel
+    layer: meta.Layer | None
 
 
 def resolve(opts: dict[str, Any], ctx: Context) -> MetaSettings:
@@ -33,7 +35,10 @@ def resolve(opts: dict[str, Any], ctx: Context) -> MetaSettings:
         else:
             images.append(given)
     lines = bool(opts.get("jsonl")) or folders or len(images) > 1
-    return MetaSettings(tuple(images), bool(opts.get("raw")), lines, bool(ctx.config.defaults.get("v5_hidden_options")))
+    layer = meta.Layer(opts["layer"]) if opts.get("layer") else None
+    return MetaSettings(
+        tuple(images), bool(opts.get("raw")), lines, bool(ctx.config.defaults.get("v5_hidden_options")), layer
+    )
 
 
 def run(s: MetaSettings, ctx: Context) -> dict[str, Any]:
@@ -48,10 +53,12 @@ def run(s: MetaSettings, ctx: Context) -> dict[str, Any]:
     if not s.lines:
         (image,) = s.images
         return {"ok": True, **_intact(_read(image, s, files, warnings))}
-    counts = {"images": len(s.images), "without_settings": 0, "damaged": 0, "failed": 0}
+    counts = {"images": len(s.images), "without_settings": 0, "damaged": 0, "failed": 0, "layers_differ": 0}
     for image in s.images:
         try:
-            line = {"ok": True, "type": "image", **_intact(_read(image, s, files, warnings))}
+            out = _read(image, s, files, warnings)
+            counts["layers_differ"] += bool(out["layers"]["differences"])
+            line = {"ok": True, "type": "image", **_intact(out)}
         except errors.NaiError as e:
             # An image without settings is an answer about it, not a failure to read it
             if e.code == errors.NO_METADATA:
@@ -90,12 +97,13 @@ def _damage(intact: bool | None) -> list[str]:
 
 
 def _read(image: Path, s: MetaSettings, files: dict[Path, dict[str, Any]], warnings: list[str]) -> dict[str, Any]:
-    record, intact = meta.parse_checked(image)
+    layers, intact = meta.read_checked(image, s.layer)
+    record = meta.parse_raw(layers.settings)
     if not s.raw:
         record.pop("raw", None)
-    out = {"image": str(image), "image_ok": intact, **record}
+    out = {"image": str(image), "image_ok": intact, "layers": layers.to_json(), **record}
     out["gen_args"] = rerun.to_gen_args(record, image, hidden_options=s.hidden_options)
-    out["warnings"] = [*warnings, *_damage(intact), *rerun.rerun_gaps(record)]
+    out["warnings"] = [*warnings, *meta.layer_warnings(layers), *_damage(intact), *rerun.rerun_gaps(record)]
     entry = files.get(image.resolve())
     if entry:
         out["ledger"] = entry

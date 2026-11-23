@@ -1,5 +1,6 @@
 """Images made with settings in them, damaged or oversized ones, pixel art and Vibe entries, shared by the tests."""
 
+import gzip
 import hashlib
 import io
 import json
@@ -8,6 +9,8 @@ import zlib
 
 import numpy as np
 from PIL import Image, PngImagePlugin
+
+from nai_cli import decode
 
 
 def noisy_png() -> bytes:
@@ -103,6 +106,86 @@ def with_comment(path, comment):
     info = PngImagePlugin.PngInfo()
     info.add_text("Comment", comment)
     Image.new("RGB", (8, 8)).save(path, pnginfo=info)
+    return path
+
+
+def settings(prompt="1girl, smile", **comment) -> dict[str, str]:
+    """The settings of a NovelAI image as its text keeps them: six fields as text, Comment as JSON."""
+    comment = {
+        "prompt": prompt,
+        "uc": "lowres",
+        "seed": 5,
+        "width": 64,
+        "height": 64,
+        "steps": 28,
+        "scale": 4.0,
+        "sampler": "k_euler_ancestral",
+        "signed_hash": "SIGNATURE",
+        **comment,
+    }
+    return {
+        "Title": "NovelAI generated image",
+        "Description": prompt,
+        "Software": "NovelAI",
+        "Source": "NovelAI Diffusion V5 0ADF9AB7",
+        "Generation time": "6.6",
+        "Comment": json.dumps(comment),
+    }
+
+
+def with_comment_field(settings: dict[str, str], **changes) -> dict[str, str]:
+    """settings with changes inside its Comment; a field given as None is removed."""
+    kept = json.loads(settings["Comment"])
+    comment = {k: v for k, v in kept.items() if k not in changes or changes[k] is not None}
+    comment.update({k: v for k, v in changes.items() if v is not None})
+    return {**settings, "Comment": json.dumps(comment)}
+
+
+def stealth_payload(settings: dict[str, str]) -> bytes:
+    """settings as NovelAI hides them in an image: every field but Title as JSON, gzipped, behind the magic and the
+    length in bits, and before the mark that says no error correction follows."""
+    data = {k: v for k, v in settings.items() if k != "Title"}
+    packed = gzip.compress(json.dumps(data).encode(), mtime=0)
+    return b"stealth_pngcomp" + (len(packed) * 8).to_bytes(4, "big") + packed + b"\xff\xff\xff\xff"
+
+
+def in_low_bits(img: Image.Image, payload: bytes) -> Image.Image:
+    """A copy of img with payload in the lowest bits of its alpha channel, column-major as the official writer goes."""
+    arr = np.array(img.convert("RGBA"))
+    bits = np.unpackbits(np.frombuffer(payload, dtype=np.uint8))
+    height = arr.shape[0]
+    where = np.arange(len(bits))
+    assert len(bits) <= img.width * height
+    rows, cols = where % height, where // height
+    arr[rows, cols, 3] = (arr[rows, cols, 3] & 0xFE) | bits
+    return Image.fromarray(arr)
+
+
+def layered_png(path, text: dict[str, str] | None, stealth: dict[str, str] | None = None, size=(96, 96)):
+    """A PNG as NovelAI saves one, in a folder made for it: the settings in its text chunks and in its alpha
+    channel; either copy may be left out."""
+    img = Image.new("RGBA", size, (10, 20, 30, 255))
+    if stealth is not None:
+        img = in_low_bits(img, stealth_payload(stealth))
+    info = PngImagePlugin.PngInfo()
+    for key, value in (text or {}).items():
+        info.add_text(key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, pnginfo=info)
+    return path
+
+
+def latin1_description(path):
+    """path with its Description chunk as NovelAI writes it to the byte: a tEXt chunk, which PNG defines as Latin-1,
+    with a no-break space as one byte, 0xA0."""
+    data = path.read_bytes()
+    out = data[:8]
+    for _kind, body, start, end in decode.png_chunks(data):
+        if body.startswith(b"Description\0"):
+            out += decode.png_chunk(b"tEXt", b"Description\0" + body.split(b"\0", 4)[-1].replace(b"\xc2\xa0", b"\xa0"))
+        else:
+            out += data[start:end]
+    path.write_bytes(out)
     return path
 
 

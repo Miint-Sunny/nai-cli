@@ -15,6 +15,7 @@ from nai_cli import (
     import_image,
     inpaint,
     ledger,
+    meta,
     models,
     presets,
     random_prompt,
@@ -308,6 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--raw", action=SWITCH, help="include the raw Comment")
     m.add_argument("--jsonl", action=SWITCH, help="one JSON line per image and a summary, even for one image")
     m.add_argument("-r", "--recursive", action=SWITCH, help="also read the folders inside folders given")
+    m.add_argument(
+        "--layer",
+        choices=[layer.value for layer in meta.Layer],
+        help="read one copy of the settings only: text is the PNG text or, without it, the EXIF, and stealth is the "
+        "alpha channel. By default both are read, and the text gives way to stealth data that alone is signed",
+    )
 
     lt = sub.add_parser("lint", help="check prompts for common mistakes")
     _add_generation_args(lt)
