@@ -30,7 +30,7 @@ def resolve(opts: dict[str, Any], ctx: Context) -> WatermarkSettings:
     text = unicodedata.normalize("NFC", text.replace("\\n", "\n")) if text else None
     font = Path(opts["font"]) if opts.get("font") else None
     if text:
-        share.require_glyphs(text, font)
+        font = share.text_font(text, font)
     mark = share.Watermark(
         text=text,
         text_layer=_layer(opts, "", defaults.text_layer),

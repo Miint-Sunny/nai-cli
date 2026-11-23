@@ -233,7 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
     wm = sub.add_parser("watermark", help="save copies of images with visible text or a logo, for sharing")
     _add_copy_args(wm, "watermarked")
     wm.add_argument("--text", help="text to write; \\n breaks lines (default: NovelAI unless --logo is given)")
-    wm.add_argument("--font", type=values.path, metavar="FILE", help="a TrueType or OpenType font, needed beyond ASCII")
+    wm.add_argument(
+        "--font",
+        type=values.path,
+        metavar="FILE",
+        help="a TrueType or OpenType font, needed beyond ASCII except on macOS, which has system fonts for it",
+    )
     wm.add_argument("--color", metavar="#RRGGBB", help="text colour (default: #FFFFFF)")
     wm.add_argument("--logo", type=values.path, metavar="IMAGE", help="an image to place as a logo")
     for prefix, what, defaults in (

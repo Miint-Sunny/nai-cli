@@ -2,6 +2,7 @@
 
 import io
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -165,7 +166,9 @@ def test_strip_file_keeps_the_pixels_of_a_still_image(tmp_path):
     assert Image.open(io.BytesIO(data)).getpixel((0, 0)) == (0, 0, 255)
 
 
-def test_text_the_font_cannot_draw_is_refused_before_any_copy(capsys, tmp_path):
+def test_text_the_font_cannot_draw_is_refused_before_any_copy(capsys, tmp_path, monkeypatch):
+    # No system font to fall back on, as on Windows and Linux
+    monkeypatch.setattr(share, "_SYSTEM_FONTS", {})
     source = tmp_path / "pic.png"
     nai_image(source, w=64, h=64)
     code, out = run(capsys, "watermark", str(source), "--text", "作者 me")
@@ -173,6 +176,32 @@ def test_text_the_font_cannot_draw_is_refused_before_any_copy(capsys, tmp_path):
     assert "files" not in out and not any(config.load(config.default_path()).output_dir.rglob("*.png"))
     code, out = run(capsys, "watermark", str(source), "--text", "by me\nline two")
     assert code == 0, out
+
+
+_MAC_CHINESE = Path("/System/Library/Fonts/Hiragino Sans GB.ttc")
+
+
+def test_text_the_built_in_font_lacks_takes_a_system_font(capsys, tmp_path, monkeypatch):
+    if not _MAC_CHINESE.is_file():
+        pytest.skip("needs the Chinese font macOS ships")
+    monkeypatch.setattr(share, "_SYSTEM_FONTS", {sys.platform: ("/nowhere/missing.ttc", str(_MAC_CHINESE))})
+    assert share.text_font("作者 me", None) == _MAC_CHINESE
+    # Text the built-in font draws keeps it, and a font the user gives is never replaced
+    assert share.text_font("by me", None) is None
+    given = tmp_path / "given.ttf"
+    given.write_bytes(_MAC_CHINESE.read_bytes())
+    assert share.text_font("作者", given) == given
+    source = tmp_path / "pic.png"
+    nai_image(source, w=64, h=64)
+    code, out = run(capsys, "watermark", str(source), "--text", "作者 me")
+    assert code == 0, out
+
+
+def test_no_system_font_draws_the_text(monkeypatch):
+    monkeypatch.setattr(share, "_SYSTEM_FONTS", {sys.platform: ("/nowhere/missing.ttc",)})
+    with pytest.raises(errors.NaiError) as err:
+        share.text_font("作者", None)
+    assert "--font" in err.value.message
 
 
 _FONTS = Path("C:/Windows/Fonts")
