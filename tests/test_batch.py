@@ -142,6 +142,7 @@ def test_a_dry_run_changes_nothing_in_any_command(capsys, with_token, tmp_path):
         "strip": ["strip", str(img)],
         "redact": ["redact", str(img), "--region", region],
         "watermark": ["watermark", str(img)],
+        "reword": ["reword", str(img), "-w", "smile=grin"],
         "meta": ["meta", str(img)],
         "lint": ["lint", "--prompt", "x"],
         "tags": ["tags", "1gi"],

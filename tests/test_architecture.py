@@ -22,6 +22,7 @@ LAYERS = [
         "rerun",
         "stealth",
         "vibe",
+        "words",
         "inpaint",
         "enhance",
         "cost",

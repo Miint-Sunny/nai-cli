@@ -1,5 +1,6 @@
 """Sharing copies named after their source with a label, written all or none."""
 
+import io
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -112,7 +113,8 @@ def _free_names(targets: list[Path]) -> list[Path]:
 
 def _target(t: Targets, source: Source, label: str, data: bytes, numbers: fs.Numbers) -> Path:
     """The name given with -o, if it ends as the copy's format does; else a name in the folder -o gives, under its
-    source's place, or where a generated image is filed: by date and number with --rename, else after its source.
+    source's place, or where a generated image is filed: by date and number with --rename, else after its source or
+    after the name the source gives its copy.
     A copy's suffix is its format's."""
     suffix = _suffix(source, data)
     if t.exact is not None:
@@ -128,7 +130,7 @@ def _target(t: Targets, source: Source, label: str, data: bytes, numbers: fs.Num
         folder, kept = t.filed.folder_for(_kept(data, t.when)), "_" + label
     if t.rename:
         return numbers.name(folder, suffix)
-    return folder / f"{naming.fit(source.path.stem, kept)}{suffix}"
+    return folder / f"{naming.fit(source.stem, kept)}{suffix}"
 
 
 def _suffix(source: Source, data: bytes) -> str:
@@ -141,11 +143,11 @@ def _suffix(source: Source, data: bytes) -> str:
 
 
 def _download_names(t: Targets) -> list[str]:
-    """A copy named after its source keeps the start of the prompt and the seed where the source has NovelAI's
-    download name."""
+    """A copy whose name keeps NovelAI's download name, as one named after a source with it does, keeps the start of
+    the prompt and the seed."""
     if t.rename or t.exact is not None:
         return []
-    count = sum(naming.download_name(source.path.stem) for source in t.sources)
+    count = sum(naming.download_name(source.stem) for source in t.sources)
     if not count:
         return []
     copies = "copy is" if count == 1 else "copies are"
@@ -195,6 +197,24 @@ def finish(source: Path, edited: Image.Image, keep_metadata: bool, warnings: lis
         return images.copy_text_chunks(data, out)
     out = images.copy_text_chunks(data, out, leaving=set(settings))
     return images.add_text(out, _writable(settings, source.name, warnings))
+
+
+def with_settings(source: Path, settings: dict[str, str]) -> bytes:
+    """A PNG of the source's pixels, cleaned as strip cleans them, with settings written into both layers; bad_args
+    when the copy does not read back as it was written."""
+    opened = images.open_still(source)
+    try:
+        data = images.with_settings(opened, settings)
+    except errors.NaiError as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"{source.name}: {e.message}") from e
+    with Image.open(io.BytesIO(data)) as img:
+        img.load()
+        hidden = meta.stealth_text(img)
+    if meta.png_text_chunks(data) != settings or hidden != {k: v for k, v in settings.items() if k != "Title"}:
+        raise errors.NaiError(
+            errors.BAD_ARGS, f"{source.name}: its copy would not read back as it was written; no copy is written"
+        )
+    return data
 
 
 def _writable(settings: dict[str, str], name: str, warnings: list[str]) -> dict[str, str]:

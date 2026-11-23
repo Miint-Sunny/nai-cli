@@ -1,5 +1,8 @@
-"""Stealth data: settings hidden in the lowest bits of an image's channels, where a block lies and how to clear it."""
+"""Stealth data: settings hidden in the lowest bits of an image's channels, where a block lies, how to clear it
+and how NovelAI writes one."""
 
+import gzip
+import json
 from dataclasses import dataclass
 from enum import Enum
 
@@ -8,9 +11,13 @@ from PIL import Image
 
 from nai_cli import decode
 
+# The alpha channel holds every field of the PNG text but Title
+HIDDEN = ("Description", "Software", "Source", "Generation time", "Comment")
 MAGIC_BITS = 15 * 8
 LENGTH_BITS = 32
 HEADER_BITS = MAGIC_BITS + LENGTH_BITS
+# After the data, the alpha channel names the length of its error correction code, which NovelAI never writes
+NO_CORRECTION = 0xFFFFFFFF
 
 
 class Channel(Enum):
@@ -67,6 +74,29 @@ def clear(img: Image.Image, block: Block) -> Image.Image:
     pixels = where // 3
     rows, cols = pixels % arr.shape[0], pixels // arr.shape[0]
     arr[rows, cols, where % 3] &= 0xFE
+    return Image.fromarray(arr)
+
+
+def payload(settings: dict[str, str]) -> bytes:
+    """settings as NovelAI hides them: every field but Title as one JSON text, gzipped behind the magic and the
+    length in bits, and before the mark that says no error correction follows. The gzip header names no time, so the
+    same settings give the same bytes."""
+    text = json.dumps({key: settings[key] for key in HIDDEN if key in settings}, ensure_ascii=False)
+    packed = gzip.compress(text.encode(), mtime=0)
+    return NOVELAI_MAGIC + (len(packed) * 8).to_bytes(4, "big") + packed + NO_CORRECTION.to_bytes(4, "big")
+
+
+def embed(img: Image.Image, payload: bytes) -> Image.Image:
+    """A copy of an RGBA image with payload in the lowest bits of its alpha channel, column-major as NovelAI writes
+    it. ValueError when the image has fewer pixels than the payload has bits."""
+    arr = np.array(img)
+    bits = np.unpackbits(np.frombuffer(payload, dtype=np.uint8))
+    height, width = arr.shape[:2]
+    if len(bits) > height * width:
+        raise ValueError(f"{len(bits)} bits need as many pixels, and the image has {height} times {width}")
+    where = np.arange(len(bits))
+    rows, cols = where % height, where // height
+    arr[rows, cols, 3] = (arr[rows, cols, 3] & 0xFE) | bits
     return Image.fromarray(arr)
 
 

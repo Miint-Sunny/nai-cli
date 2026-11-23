@@ -273,6 +273,22 @@ def build_parser() -> argparse.ArgumentParser:
     wm.add_argument("--auto-place", action=SWITCH, help="move the marks to the calmest mirrored corner")
     wm.add_argument("--auto-tone", action=SWITCH, help="grey the marks to stand out from what lies under them")
 
+    rw = sub.add_parser(
+        "reword",
+        help="save copies of images with words in their settings replaced, for sharing where words are acted on",
+    )
+    _add_source_args(rw, "reworded")
+    rw.add_argument(
+        "-w",
+        "--words",
+        action="append",
+        required=True,
+        metavar="RULE",
+        help="OLD=NEW replaces OLD wherever it is part of a text, whatever its case; /REGEX/=NEW replaces by a regular "
+        "expression; NAME is a word list, the built-in discord or NAME.txt in the words folder of the config directory, "
+        "one OLD=NEW a line. Repeat to apply several in order",
+    )
+
     b = sub.add_parser("batch", help="run commands listed one per line in a JSONL file, printing a line for each")
     b.add_argument(
         "jobs",
@@ -398,6 +414,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_copy_args(p: argparse.ArgumentParser, label: str) -> None:
+    _add_source_args(p, label)
+    p.add_argument(
+        "--keep-metadata",
+        action=SWITCH,
+        help="carry the source's generation settings over, from PNG text, EXIF or the stealth data in its channels, "
+        "as PNG text; off by default, as for strip",
+    )
+
+
+def _add_source_args(p: argparse.ArgumentParser, label: str) -> None:
+    """The images a copy is made of, and where the copies go, as the commands that copy images all take them."""
     p.add_argument(
         "images", nargs="+", type=values.path, metavar="IMAGE", help="images, or folders for the images inside them"
     )
@@ -409,12 +436,6 @@ def _add_copy_args(p: argparse.ArgumentParser, label: str) -> None:
     )
     p.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
     p.add_argument("--rename", action=SWITCH, help=RENAME_HELP)
-    p.add_argument(
-        "--keep-metadata",
-        action=SWITCH,
-        help="carry the source's generation settings over, from PNG text, EXIF or the alpha channel, as PNG text; "
-        "off by default, as for strip",
-    )
 
 
 def _add_run_args(p: argparse.ArgumentParser, show_body: bool = False, output: bool = True) -> None:

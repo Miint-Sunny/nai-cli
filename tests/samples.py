@@ -131,6 +131,14 @@ def settings(prompt="1girl, smile", **comment) -> dict[str, str]:
     }
 
 
+def with_comment_field(settings: dict[str, str], **changes) -> dict[str, str]:
+    """settings with changes inside its Comment; a field given as None is removed."""
+    kept = json.loads(settings["Comment"])
+    comment = {k: v for k, v in kept.items() if k not in changes or changes[k] is not None}
+    comment.update({k: v for k, v in changes.items() if v is not None})
+    return {**settings, "Comment": json.dumps(comment)}
+
+
 def stealth_payload(settings: dict[str, str], magic: bytes = b"stealth_pngcomp") -> bytes:
     """settings as they are hidden in an image's lowest bits: every field but Title as JSON, gzipped where the
     magic says so, behind the magic and the length in bits, and in the alpha channel before the mark that says no
@@ -159,6 +167,20 @@ def in_low_bits(img: Image.Image, payload: bytes, channels: str = "alpha") -> Im
             arr[pixels % height, pixels // height, where % 3] & 0xFE
         ) | bits
     return Image.fromarray(arr)
+
+
+def layered_png(path, text: dict[str, str] | None, stealth: dict[str, str] | None = None, size=(96, 96)):
+    """A PNG as NovelAI saves one, in a folder made for it: the settings in its text chunks and in its alpha
+    channel; either copy may be left out."""
+    img = Image.new("RGBA", size, (10, 20, 30, 255))
+    if stealth is not None:
+        img = in_low_bits(img, stealth_payload(stealth))
+    info = PngImagePlugin.PngInfo()
+    for key, value in (text or {}).items():
+        info.add_text(key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, pnginfo=info)
+    return path
 
 
 def pixel_art(rows, cols, pitch, colors=8, noise=4.0, seed=1):

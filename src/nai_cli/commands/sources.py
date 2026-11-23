@@ -14,10 +14,17 @@ SUFFIXES = (".png", ".webp", ".jpg", ".jpeg")
 @dataclass(frozen=True)
 class Source:
     """An image a command works on, and where it lies inside the folder given for it: its name alone when the image
-    itself was given."""
+    itself was given. A copy is named after the image, or after copy_stem where a command gives one, as reword names
+    a copy after the image's name with the rules applied."""
 
     path: Path
     relative: Path
+    copy_stem: str | None = None
+
+    @property
+    def stem(self) -> str:
+        """What a copy of the image is named after."""
+        return self.path.stem if self.copy_stem is None else self.copy_stem
 
 
 def expand(given: Iterable[Path], suffixes: tuple[str, ...], recursive: bool) -> tuple[Source, ...]:

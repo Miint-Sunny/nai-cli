@@ -57,6 +57,18 @@ def add_text(target: bytes, texts: dict[str, str]) -> bytes:
     return _after_header(target, b"".join(decode.itxt(key, text) for key, text in texts.items()))
 
 
+def with_settings(img: Image.Image, settings: dict[str, str]) -> bytes:
+    """A PNG of the image without what it held, with settings written where NovelAI writes them: each field as a
+    text chunk, and all but Title, gzipped, in the lowest bits of an alpha channel, added opaque where the image has
+    none. bad_args for an image too small for them."""
+    hidden = _bare(img).convert("RGBA")
+    try:
+        hidden = stealth.embed(hidden, stealth.payload(settings))
+    except ValueError as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"the image is too small for its settings: {e}") from e
+    return add_text(to_png(hidden), dict(settings))
+
+
 def _after_header(target: bytes, chunks: bytes) -> bytes:
     for kind, _, _, end in decode.png_chunks(target):
         if kind == b"IHDR":
