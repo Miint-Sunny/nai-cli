@@ -4,6 +4,7 @@ import io
 import math
 from collections.abc import Collection
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageOps, ImageSequence
 
@@ -185,13 +186,34 @@ def strip_metadata(img: Image.Image) -> bytes:
 
 def strip_file(path: str | Path) -> bytes:
     """strip_metadata for an image file; an animated one stays animated, each frame cleaned, as an APNG."""
+    path = Path(path)
     try:
         with _open(path) as img:
-            if getattr(img, "n_frames", 1) > 1:
-                return _strip_animation(img)
+            animated = getattr(img, "n_frames", 1) > 1
+            frames, durations, loop = _frames(img) if animated else ((), (), 0)
     except decode.BAD_IMAGE as e:
         raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {path}: {e}") from e
-    return strip_metadata(open_image(path))
+    return _apng(frames, durations, loop) if animated else strip_metadata(open_image(path))
+
+
+def strip_in_format(path: str | Path, warnings: list[str]) -> bytes:
+    """strip_file for a copy in the format of its source. A JPEG, and a WebP without a transparent pixel, lose only
+    the segments and chunks that hold metadata, and what follows their image in the file, and stay as they are
+    otherwise; a lossless or an animated WebP is
+    cleaned as a PNG is and saved as lossless WebP; a lossy WebP with transparent pixels has to be encoded again,
+    with loss, which warnings says. Any other format is saved as a PNG, as strip_file does."""
+    path = Path(path)
+    try:
+        data = path.read_bytes()
+        if decode.format_of(data) == "JPEG":
+            return decode.strip_jpeg(data)
+        if decode.format_of(data) == "WEBP":
+            return _strip_webp(data, path, warnings)
+    except ValueError as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"cannot strip {path}: {e}") from e
+    except OSError as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {path}: {e}") from e
+    return strip_file(path)
 
 
 def open_still(path: str | Path) -> Image.Image:
@@ -210,16 +232,56 @@ def _open(path: str | Path) -> Image.Image:
     return Image.open(io.BytesIO(Path(path).read_bytes()))
 
 
-def _strip_animation(img: Image.Image) -> bytes:
+def _strip_webp(data: bytes, path: Path, warnings: list[str]) -> bytes:
+    """A WebP without its metadata. A lossy WebP's pixels are no place for stealth data: what it may hold lies in
+    its alpha chunk, which goes, unless a pixel is transparent and so the picture has to be encoded again. A lossless
+    or an animated WebP may hide settings in its pixels, which are cleaned as a PNG's are."""
+    kinds = {kind for kind, _ in decode.webp_chunks(data)}
+    try:
+        with _open(path) as img:
+            animated = getattr(img, "n_frames", 1) > 1
+            untouched = b"VP8 " in kinds and (b"ALPH" not in kinds or _opaque(img))
+    except decode.BAD_IMAGE as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {path}: {e}") from e
+    if untouched:
+        return decode.strip_webp(data)
+    if animated:
+        with _open(path) as source:
+            frames, durations, loop = _frames(source)
+        return _webp(
+            frames[0], save_all=True, append_images=frames[1:], duration=durations, loop=loop, lossless=True, exact=True
+        )
+    if b"VP8L" in kinds:
+        return _webp(_bare(open_image(path)), lossless=True, exact=True)
+    warnings.append(f"{path.name}: it has transparent pixels, so its WebP is encoded again, with loss")
+    return _webp(_bare(open_image(path)), quality=95, alpha_quality=100, exact=True)
+
+
+def _opaque(img: Image.Image) -> bool:
+    """Whether no pixel of the image is transparent: every alpha is 254 or more, as NovelAI's stealth data leaves
+    them."""
+    return "A" not in img.getbands() or img.getchannel("A").getextrema()[0] >= 254
+
+
+def _frames(img: Image.Image) -> tuple[list[Image.Image], list[int], int]:
+    """Every frame of an animation cleaned, how long each shows in milliseconds, and how often the file loops."""
     frames, durations = [], []
     for frame in ImageSequence.Iterator(img):
         # Pillow composites each frame whole, so every frame replaces the last when played
         frames.append(_bare(frame.convert("RGBA")))
         durations.append(frame.info.get("duration", 0))
+    return frames, durations, img.info.get("loop", 1)
+
+
+def _apng(frames: list[Image.Image], durations: list[int], loop: int) -> bytes:
     buf = io.BytesIO()
-    frames[0].save(
-        buf, format="PNG", save_all=True, append_images=frames[1:], duration=durations, loop=img.info.get("loop", 1)
-    )
+    frames[0].save(buf, format="PNG", save_all=True, append_images=frames[1:], duration=durations, loop=loop)
+    return buf.getvalue()
+
+
+def _webp(img: Image.Image, **saving: Any) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="WEBP", **saving)
     return buf.getvalue()
 
 

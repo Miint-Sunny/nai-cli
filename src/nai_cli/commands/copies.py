@@ -14,29 +14,37 @@ from nai_cli.commands.context import Context
 from nai_cli.commands.output import IMAGE_SUFFIXES
 from nai_cli.commands.sources import Source
 
+PNG = (".png",)
+# With strip --keep-format a copy has the format of its source, one of these
+FORMATS = (".png", ".webp", ".jpg", ".jpeg")
+# The format each suffix names, as decode.format_of names formats
+_FAMILIES = {".png": "PNG", ".webp": "WEBP", ".jpg": "JPEG", ".jpeg": "JPEG"}
+
 
 @dataclass(frozen=True)
 class Targets:
     sources: tuple[Source, ...]
-    # A .png name for one image; taken, it gets the next number, as every name does
+    # A file name for one image; taken, it gets the next number, as every name does
     exact: Path | None
     folder: Path | None
     # Without -o: the output folder and its folder rule, as generated images are filed
     filed: naming.Destination
     # --rename: by the day and a number in it, not after the source
     rename: bool
+    # The suffixes the copies may have
+    formats: tuple[str, ...]
     when: datetime
     dry_run: bool
 
 
-def resolve(opts: dict[str, Any], ctx: Context) -> Targets:
+def resolve(opts: dict[str, Any], ctx: Context, formats: tuple[str, ...] = PNG) -> Targets:
     given = tuple(map(Path, opts["images"]))
     found = sources.expand(given, sources.SUFFIXES, bool(opts.get("recursive")))
     if not found:
         raise errors.NaiError(errors.BAD_ARGS, "no images in the paths given")
     out = values.path(opts["output"]) if opts.get("output") else None
     exact = folder = None
-    if out is not None and out.suffix.lower() == ".png":
+    if out is not None and out.suffix.lower() in formats:
         # A folder stands for as many images as it holds
         if len(found) > 1 or any(fs.is_folder(p) for p in given):
             raise errors.NaiError(errors.BAD_ARGS, "-o names one file; give a folder for several images")
@@ -47,15 +55,27 @@ def resolve(opts: dict[str, Any], ctx: Context) -> Targets:
         exact = out
     elif out is not None:
         if out.suffix.lower() in IMAGE_SUFFIXES and not fs.is_folder(out):
-            raise errors.NaiError(errors.BAD_ARGS, f"copies are saved as PNG; give -o a .png name or a folder: {out}")
+            raise _no_name_for(out, formats)
         folder = out
-    return Targets(found, exact, folder, output.filed(ctx.config), bool(opts.get("rename")), ctx.now(), ctx.dry_run)
+    targets = Targets(
+        found, exact, folder, output.filed(ctx.config), bool(opts.get("rename")), formats, ctx.now(), ctx.dry_run
+    )
+    return targets
+
+
+def _no_name_for(out: Path, formats: tuple[str, ...]) -> errors.NaiError:
+    if formats == PNG:
+        return errors.NaiError(errors.BAD_ARGS, f"copies are saved as PNG; give -o a .png name or a folder: {out}")
+    return errors.NaiError(
+        errors.BAD_ARGS,
+        f"copies keep the format of their source; give -o a name ending in {', '.join(formats)}, or a folder: {out}",
+    )
 
 
 def write(t: Targets, label: str, make: Callable[[Path], bytes], warnings: list[str] | None = None) -> dict[str, Any]:
-    """NAME_label.png in the output folder, or NAME.png in the folder given, under the place its source has in the
-    folder it came from, or, with --rename, by date and number there; warnings are those make adds and those about
-    the names."""
+    """NAME_label.EXT in the output folder, or NAME.EXT in the folder given under the place its source has in the
+    folder it came from, EXT being the copy's; or, with --rename, by date and number there. warnings are those make
+    adds and those about the names."""
     # Every image is made before anything is written, so a bad one leaves no partial set
     copies = [make(source.path) for source in t.sources]
     numbers = fs.Numbers(t.when)
@@ -91,17 +111,33 @@ def _free_names(targets: list[Path]) -> list[Path]:
 
 
 def _target(t: Targets, source: Source, label: str, data: bytes, numbers: fs.Numbers) -> Path:
-    """The name given with -o; else a name in the folder -o gives, under its source's place, or where a generated
-    image is filed: by date and number with --rename, else after its source."""
+    """The name given with -o, if it ends as the copy's format does; else a name in the folder -o gives, under its
+    source's place, or where a generated image is filed: by date and number with --rename, else after its source.
+    A copy's suffix is its format's."""
+    suffix = _suffix(source, data)
     if t.exact is not None:
+        if _FAMILIES[t.exact.suffix.lower()] != decode.format_of(data):
+            kind = decode.format_of(data).lower()
+            raise errors.NaiError(
+                errors.BAD_ARGS, f"{source.path.name} is copied as {kind}: give -o a {suffix} name or a folder"
+            )
         return t.exact
     if t.folder is not None:
         folder, kept = t.folder / source.relative.parent, ""
     else:
         folder, kept = t.filed.folder_for(_kept(data, t.when)), "_" + label
     if t.rename:
-        return numbers.name(folder)
-    return folder / f"{naming.fit(source.path.stem, kept)}.png"
+        return numbers.name(folder, suffix)
+    return folder / f"{naming.fit(source.path.stem, kept)}{suffix}"
+
+
+def _suffix(source: Source, data: bytes) -> str:
+    """A copy's suffix by the format of its bytes: its source's own spelling of that format where the source has
+    one."""
+    own = source.path.suffix.lower()
+    if _FAMILIES.get(own) == decode.format_of(data):
+        return own
+    return {"PNG": ".png", "WEBP": ".webp"}.get(decode.format_of(data), ".jpg")
 
 
 def _download_names(t: Targets) -> list[str]:

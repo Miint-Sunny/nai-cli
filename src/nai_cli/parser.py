@@ -215,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     st.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
     st.add_argument("--rename", action=SWITCH, help=RENAME_HELP)
+    st.add_argument(
+        "--keep-format",
+        action=SWITCH,
+        help="keep each copy in its source's format instead of PNG. A JPEG, and a WebP without a transparent pixel, "
+        "lose only their metadata and are not encoded again; a lossless WebP stays lossless",
+    )
 
     rd = sub.add_parser("redact", help="save copies of images with regions pixelated, blurred or filled, for sharing")
     _add_copy_args(rd, "redacted")

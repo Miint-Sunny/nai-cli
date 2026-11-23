@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from nai_cli import decode, errors, images, presets, stealth, values
 from nai_cli import prompt as P
@@ -130,8 +130,40 @@ def read_raw(path: str | Path) -> dict[str, str]:
 
 
 def raw_of(data: bytes, name: str) -> dict[str, str]:
-    """The settings an image's bytes keep, from PNG text, EXIF or the alpha channel; bytes that are no image are
-    refused, not taken for an image without settings."""
+    """The settings an image's bytes keep, from PNG text, EXIF or the lowest bits of its channels; bytes that are no
+    image are refused, not taken for an image without settings."""
+    found = _found(data, name)
+    if found is None:
+        raise errors.NaiError(errors.NO_METADATA, f"{name} has no NovelAI generation settings")
+    return found
+
+
+def left_in(data: bytes) -> list[str]:
+    """What image bytes still hold of what a copy without settings must lose: generation settings, stealth data,
+    EXIF or XMP, looked for in every frame. Bytes that cannot be read are refused."""
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+            left = []
+            if img.getexif():
+                left.append("EXIF")
+            if img.info.get("xmp"):
+                left.append("XMP")
+            for frame in ImageSequence.Iterator(img):
+                frame.load()
+                if stealth.find(images.rgb_or_rgba(frame), math.inf) is not None:
+                    left.append("stealth data")
+                    break
+    except decode.BAD_IMAGE as e:
+        raise errors.NaiError(errors.BAD_ARGS, f"cannot read the image back: {e}") from e
+    if _found(data, "the copy") is not None:
+        left.append("generation settings")
+    return sorted(left)
+
+
+def _found(data: bytes, name: str) -> dict[str, str] | None:
+    """The first copy of the settings the image bytes keep, PNG text, then EXIF, then the lowest bits of its
+    channels; None where there is none."""
     chunks = png_text_chunks(data)
     if "Comment" in chunks:
         return chunks
@@ -143,9 +175,7 @@ def raw_of(data: bytes, name: str) -> dict[str, str]:
                 found = stealth_text(img)
     except decode.BAD_IMAGE as e:
         raise errors.NaiError(errors.BAD_ARGS, f"cannot read image {name}: {e}") from e
-    if "Comment" in found:
-        return found
-    raise errors.NaiError(errors.NO_METADATA, f"{name} has no NovelAI generation settings")
+    return found if "Comment" in found else None
 
 
 def _stored_vibes(encodings: Any) -> int:
