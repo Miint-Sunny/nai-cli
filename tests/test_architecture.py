@@ -26,6 +26,7 @@ LAYERS = [
         "inpaint",
         "enhance",
         "cost",
+        "fake",
         "naming",
         "tokenizer",
         "lint",

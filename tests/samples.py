@@ -6,9 +6,12 @@ import io
 import json
 import struct
 import zlib
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, PngImagePlugin
+
+from nai_cli import meta
 
 
 def noisy_png() -> bytes:
@@ -181,6 +184,14 @@ def layered_png(path, text: dict[str, str] | None, stealth: dict[str, str] | Non
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, pnginfo=info)
     return path
+
+
+def layers_of(path) -> tuple[dict, dict]:
+    """What an image file holds in its PNG text, and in the lowest bits of its alpha channel."""
+    data = Path(path).read_bytes()
+    with Image.open(path) as img:
+        img.load()
+        return meta.png_text_chunks(data), meta.stealth_text(img)
 
 
 def pixel_art(rows, cols, pitch, colors=8, noise=4.0, seed=1):

@@ -289,6 +289,26 @@ def build_parser() -> argparse.ArgumentParser:
         "one OLD=NEW a line. Repeat to apply several in order",
     )
 
+    fk = sub.add_parser(
+        "fake", help="save copies of images with made-up settings, for sharing without telling what made them"
+    )
+    _add_source_args(fk, "fake")
+    fk.add_argument(
+        "--preset",
+        metavar="SPEC",
+        help="1 fills every field with spaces, 2 with a taunt 64 times over; NAME is NAME.json in the fakes folder of "
+        "the config directory, used in place of a built-in of the same name; @FILE.json is a template; any other "
+        "text goes into every field",
+    )
+    fk.add_argument(
+        "--set",
+        action="append",
+        metavar="KEY=VALUE",
+        help="a field to change, repeatable: one of the text fields, prompt, uc, or any field of Comment. The value "
+        "is read as JSON where it is JSON, else as text. Alone it changes the image's own settings; with --preset, "
+        "the preset",
+    )
+
     b = sub.add_parser("batch", help="run commands listed one per line in a JSONL file, printing a line for each")
     b.add_argument(
         "jobs",

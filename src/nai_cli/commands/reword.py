@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from nai_cli import config, errors, fs, meta, words
@@ -32,9 +33,13 @@ def run(s: RewordSettings, ctx: Context) -> dict[str, Any]:
     prepared, skipped = _prepared(s.targets.sources, s.rules)
     named = [_named(source, s.targets, s.rules) for source, _, _ in prepared]
     # Keyed by the image itself, not by the name of its copy: the rules may give the copies of two images one name
-    made = {source.path: copies.with_settings(source.path, settings) for source, settings, _ in prepared}
+    made = {source.path: settings for source, settings, _ in prepared}
+
+    def data(path: Path) -> bytes:
+        return copies.with_settings(path, lambda size: made[path])
+
     targets = replace(s.targets, sources=tuple(named))
-    out = copies.write(targets, "reworded", lambda path: made[path], warnings)
+    out = copies.write(targets, "reworded", data, warnings)
     for entry, (_, _, replaced) in zip(out["files"], prepared, strict=True):
         entry["replaced"] = replaced
     return {**out, "skipped": skipped, "warnings": out.get("warnings", [])}

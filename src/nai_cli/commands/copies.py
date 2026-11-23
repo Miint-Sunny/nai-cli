@@ -199,18 +199,20 @@ def finish(source: Path, edited: Image.Image, keep_metadata: bool, warnings: lis
     return images.add_text(out, _writable(settings, source.name, warnings))
 
 
-def with_settings(source: Path, settings: dict[str, str]) -> bytes:
-    """A PNG of the source's pixels, cleaned as strip cleans them, with settings written into both layers; bad_args
-    when the copy does not read back as it was written."""
+def with_settings(source: Path, settings: Callable[[tuple[int, int]], dict[str, str]]) -> bytes:
+    """A PNG of the source's pixels, cleaned as strip cleans them, with the settings made for its size written into
+    both layers; bad_args when the copy does not read back as it was written."""
     opened = images.open_still(source)
+    # Made once: a plan may draw a seed or a time of its own for every image
+    written = settings(opened.size)
     try:
-        data = images.with_settings(opened, settings)
+        data = images.with_settings(opened, written)
     except errors.NaiError as e:
         raise errors.NaiError(errors.BAD_ARGS, f"{source.name}: {e.message}") from e
     with Image.open(io.BytesIO(data)) as img:
         img.load()
         hidden = meta.stealth_text(img)
-    if meta.png_text_chunks(data) != settings or hidden != {k: v for k, v in settings.items() if k != "Title"}:
+    if meta.png_text_chunks(data) != written or hidden != {k: v for k, v in written.items() if k != "Title"}:
         raise errors.NaiError(
             errors.BAD_ARGS, f"{source.name}: its copy would not read back as it was written; no copy is written"
         )

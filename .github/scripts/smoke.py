@@ -152,6 +152,7 @@ def _cases(root: Path) -> list[tuple[str, list[str], str]]:
         ("watermark keep", ["watermark", str(pic), "--keep-metadata", "-o", str(out / "kept.png")], "ok"),
         ("meta of kept", ["meta", str(out / "kept.png")], "ok"),
         ("reword", ["reword", str(pic), "-w", "1girl=1boy", "-o", str(out / "reworded.png")], "ok"),
+        ("fake", ["fake", str(pic), "--preset", "1", "-o", str(out / "fake.png")], "ok"),
         ("pixel-snap", ["tool", "pixel-snap", str(art), "-o", str(out / "snapped.png")], "ok"),
         ("missing image", ["meta", str(work / "none.png")], "error"),
     ]
