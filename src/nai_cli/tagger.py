@@ -338,7 +338,9 @@ def _vocabulary(data: dict[str, Any]) -> Labels | None:
     labels = []
     for i in sorted(by_index):
         raw = of_tag.get(by_index[i])
-        category = None if raw is None else names_of.get(str(raw), raw)
+        named = None if raw is None else names_of.get(str(raw), raw)
+        # Most files map a category id to its name; CL tagger v2 lists the tags under each name instead
+        category = raw if isinstance(named, list) else named
         labels.append(Label(by_index[i], category_of(None if category is None else str(category), by_index[i])))
     return Labels(labels)
 

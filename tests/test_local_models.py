@@ -87,6 +87,15 @@ def test_plain_lists_count_as_general(tmp_path):
             {"idx_to_tag": {"1": "b", "0": "a"}, "tag_to_category": {"a": "4"}, "categories": {"4": "character"}},
             [("a", "character"), ("b", "other")],
         ),
+        (
+            # CL tagger v2's model_vocabulary.json lists the tags of each category under its name
+            {
+                "tag_to_idx": {"a": 0, "b": 1, "c": 2},
+                "tag_to_category": {"a": "General", "b": "Character", "c": "Rating"},
+                "categories": {"General": ["a"], "Character": ["b"], "Rating": ["c"]},
+            },
+            [("a", "general"), ("b", "character"), ("c", "rating")],
+        ),
     ],
 )
 def test_json_tag_lists(tmp_path, data, expected):
