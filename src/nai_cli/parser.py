@@ -26,6 +26,10 @@ from nai_cli import (
 SWITCH = argparse.BooleanOptionalAction
 MODEL_HELP = "v5, v5-curated, v5-medium, v4.5, v4.5-curated, v4, v4-curated (default: v5)"
 EFFORT_HELP = "V5 Full at high or medium effort (default: the config's effort, else high)"
+RENAME_HELP = (
+    "name copies by date and number, such as 20261123-0001.png, counting on from the highest in their folder; "
+    "an -o folder may be given, an -o file name may not"
+)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -210,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="a .png name for one image, or a folder (default: NAME_clean.png in the output folder)",
     )
     st.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
+    st.add_argument("--rename", action=SWITCH, help=RENAME_HELP)
 
     rd = sub.add_parser("redact", help="save copies of images with regions pixelated, blurred or filled, for sharing")
     _add_copy_args(rd, "redacted")
@@ -397,6 +402,7 @@ def _add_copy_args(p: argparse.ArgumentParser, label: str) -> None:
         help=f"a .png name for one image, or a folder (default: NAME_{label}.png in the output folder)",
     )
     p.add_argument("-r", "--recursive", action=SWITCH, help="also copy the images in the folders inside folders given")
+    p.add_argument("--rename", action=SWITCH, help=RENAME_HELP)
     p.add_argument(
         "--keep-metadata",
         action=SWITCH,

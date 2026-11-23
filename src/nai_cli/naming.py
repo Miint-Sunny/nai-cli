@@ -293,6 +293,16 @@ def _clean(name: str) -> str:
     return fit(P.js_trim(out[:_NAME_LENGTH]) if len(out) > _NAME_LENGTH else out)
 
 
+# The name the official client downloads an image under: the start of the prompt, a space, s- and the seed
+_DOWNLOAD_NAME = re.compile(r" s-[0-9]+$")
+
+
+def download_name(stem: str) -> bool:
+    """Whether a file's name is the official client's download name, which holds the start of its prompt and its
+    seed, and so tells about an image however clean a copy of it is."""
+    return _DOWNLOAD_NAME.search(stem) is not None
+
+
 def fallback(meta: Meta) -> str:
     """The official client's name when a template renders empty: the prompt's start and the seed."""
     seed = "" if meta.seed is None else str(meta.seed)

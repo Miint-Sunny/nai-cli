@@ -6,6 +6,8 @@ import stat
 import sys
 import time
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import BinaryIO
@@ -66,6 +68,38 @@ def create_numbered(path: Path, data: bytes | str) -> Path:
             return create(numbered(path, n), data)
         except FileExistsError:
             n += 1
+
+
+@dataclass
+class Numbers:
+    """The names --rename gives copies: the day of the run and a number, as 20261123-0001.png. Each folder counts on
+    from the highest number the names of that day in it hold, whatever their suffix."""
+
+    when: datetime
+    highest: dict[Path, int] = field(default_factory=dict)
+
+    def name(self, folder: Path, suffix: str = ".png") -> Path:
+        """The next name in folder for the day of the run. The one after it is one higher whether or not this one is
+        written, so a dry run names a copy as its run does."""
+        if folder not in self.highest:
+            self.highest[folder] = max(_dated(folder, self.when), default=0)
+        self.highest[folder] += 1
+        return folder / f"{self.when:%Y%m%d}-{self.highest[folder]:04d}{suffix}"
+
+
+def _dated(folder: Path, when: datetime) -> list[int]:
+    """The numbers the names in folder hold for the day of when; a folder that is not there yet holds none."""
+    day = f"{when:%Y%m%d}-"
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    numbers = []
+    for name in names:
+        stem = name.partition(".")[0]
+        if stem.startswith(day) and values.is_digits(number := stem[len(day) :]) and len(number) >= 4:
+            numbers.append(int(number))
+    return numbers
 
 
 def replace(path: Path, data: bytes | str, private: bool = False) -> Path:

@@ -57,7 +57,7 @@ Every rule lives in one place. A second implementation of a rule drifts from the
 | What each model supports | `models.py` |
 | Prices, tiers and free allowances | `cost.py` |
 | File name candidates from templates and folders | `naming.py` |
-| Every write of a file: collision numbering, never overwriting, atomic replacement, file locks | `fs.py` |
+| Every write of a file: collision numbering, the date-and-number names of `--rename`, never overwriting, atomic replacement, file locks | `fs.py` |
 | Text a request can carry | `values.py` |
 | Settings stored in images and how they are read | `meta.py` |
 | Stealth data: the layout of the bits hidden in an image's channels, where a block is found and how its bits are cleared | `stealth.py` |

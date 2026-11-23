@@ -23,6 +23,20 @@ META = naming.Meta(
 )
 
 
+@pytest.mark.parametrize(
+    ("stem", "download"),
+    [
+        ("1girl, solo, smile s-1234", True),
+        (" s-1", True),
+        ("pic", False),
+        ("s-1234", False),
+        ("1girl s-12 more", False),
+    ],
+)
+def test_the_official_download_name_is_told_by_its_end(stem, download):
+    assert naming.download_name(stem) is download
+
+
 def name(template: str, meta: naming.Meta = META) -> str:
     return naming.render(naming.parse(template), meta)
 

@@ -5,6 +5,7 @@
 - `nai meta` also reads settings hidden in the RGB channels (`stealth_rgbinfo`, `stealth_rgbcomp`).
 - Copies made by `nai strip`, `nai redact` and `nai watermark` no longer keep stealth data hidden in the RGB channels. Only the bits it occupies change.
 - `nai strip`, `nai redact` and `nai watermark` take folders, with `-r` for the folders inside them. With `-o`, a copy keeps its path inside the folder given.
+- `--rename` names copies by date and number, such as `20261123-0001.png`, instead of after their source. NovelAI's file names hold the start of the prompt and the seed, and copying an image named so warns when `--rename` is not given.
 
 ## 0.1.0 - 2026-11-20
 

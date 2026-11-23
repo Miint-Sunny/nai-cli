@@ -23,6 +23,8 @@ class Targets:
     folder: Path | None
     # Without -o: the output folder and its folder rule, as generated images are filed
     filed: naming.Destination
+    # --rename: by the day and a number in it, not after the source
+    rename: bool
     when: datetime
     dry_run: bool
 
@@ -38,21 +40,28 @@ def resolve(opts: dict[str, Any], ctx: Context) -> Targets:
         # A folder stands for as many images as it holds
         if len(found) > 1 or any(fs.is_folder(p) for p in given):
             raise errors.NaiError(errors.BAD_ARGS, "-o names one file; give a folder for several images")
+        if opts.get("rename"):
+            raise errors.NaiError(
+                errors.BAD_ARGS, "--rename names copies by date and number: give -o a folder, or no -o"
+            )
         exact = out
     elif out is not None:
         if out.suffix.lower() in IMAGE_SUFFIXES and not fs.is_folder(out):
             raise errors.NaiError(errors.BAD_ARGS, f"copies are saved as PNG; give -o a .png name or a folder: {out}")
         folder = out
-    return Targets(found, exact, folder, output.filed(ctx.config), ctx.now(), ctx.dry_run)
+    return Targets(found, exact, folder, output.filed(ctx.config), bool(opts.get("rename")), ctx.now(), ctx.dry_run)
 
 
 def write(t: Targets, label: str, make: Callable[[Path], bytes], warnings: list[str] | None = None) -> dict[str, Any]:
     """NAME_label.png in the output folder, or NAME.png in the folder given, under the place its source has in the
-    folder it came from; warnings are those make adds."""
+    folder it came from, or, with --rename, by date and number there; warnings are those make adds and those about
+    the names."""
     # Every image is made before anything is written, so a bad one leaves no partial set
     copies = [make(source.path) for source in t.sources]
-    targets = [_target(t, source, label, data) for source, data in zip(t.sources, copies, strict=True)]
-    noted = {"warnings": warnings} if warnings else {}
+    numbers = fs.Numbers(t.when)
+    targets = [_target(t, source, label, data, numbers) for source, data in zip(t.sources, copies, strict=True)]
+    notes = [*_download_names(t), *(warnings or [])]
+    noted = {"warnings": notes} if notes else {}
     if t.dry_run:
         for target in targets:
             output.check_folder(target.parent, target if target == t.exact else None)
@@ -81,12 +90,33 @@ def _free_names(targets: list[Path]) -> list[Path]:
     return out
 
 
-def _target(t: Targets, source: Source, label: str, data: bytes) -> Path:
+def _target(t: Targets, source: Source, label: str, data: bytes, numbers: fs.Numbers) -> Path:
+    """The name given with -o; else a name in the folder -o gives, under its source's place, or where a generated
+    image is filed: by date and number with --rename, else after its source."""
     if t.exact is not None:
         return t.exact
     if t.folder is not None:
-        return t.folder / source.relative.with_name(f"{naming.fit(source.path.stem)}.png")
-    return t.filed.folder_for(_kept(data, t.when)) / f"{naming.fit(source.path.stem, '_' + label)}.png"
+        folder, kept = t.folder / source.relative.parent, ""
+    else:
+        folder, kept = t.filed.folder_for(_kept(data, t.when)), "_" + label
+    if t.rename:
+        return numbers.name(folder)
+    return folder / f"{naming.fit(source.path.stem, kept)}.png"
+
+
+def _download_names(t: Targets) -> list[str]:
+    """A copy named after its source keeps the start of the prompt and the seed where the source has NovelAI's
+    download name."""
+    if t.rename or t.exact is not None:
+        return []
+    count = sum(naming.download_name(source.path.stem) for source in t.sources)
+    if not count:
+        return []
+    copies = "copy is" if count == 1 else "copies are"
+    return [
+        f"{count} {copies} named after NovelAI's download name, which holds the start of the prompt and the seed; "
+        "--rename names copies by date and number instead"
+    ]
 
 
 def _kept(data: bytes, when: datetime) -> naming.Meta:

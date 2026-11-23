@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,20 @@ def test_numbered_keeps_double_suffixes(tmp_path):
     assert fs.numbered(tmp_path / "a.png", 2).name == "a-2.png"
     assert fs.numbered(tmp_path / "c.naiv4vibebundle.png", 1).name == "c-1.naiv4vibebundle.png"
     assert fs.numbered(tmp_path / "2026-11-18.naiv4vibebundle", 1).name == "2026-11-18-1.naiv4vibebundle"
+
+
+def test_date_numbers_count_on_in_each_folder_from_the_highest_of_the_day(tmp_path):
+    for name in ("20261123-0003.webp", "20261123-0002.png", "20261122-0100.png", "20261123-7.png", "20261123-12345"):
+        fs.create(tmp_path / "out" / name, b"")
+    numbers = fs.Numbers(datetime(2026, 11, 23, 14, 15))
+    # Counted on whether or not the name before was written, so a dry run names a copy as its run does
+    assert [numbers.name(tmp_path / "out").name for _ in range(3)] == [
+        "20261123-12346.png",
+        "20261123-12347.png",
+        "20261123-12348.png",
+    ]
+    assert numbers.name(tmp_path / "out" / "sub").name == "20261123-0001.png"
+    assert numbers.name(tmp_path / "out", ".webp").name == "20261123-12349.webp"
 
 
 def test_create_never_replaces_a_file(tmp_path):

@@ -55,7 +55,7 @@ Read the reference when the task comes up:
 
 Smaller ones:
 
-- Before the user shares an image, `nai strip IMAGE` saves a copy without its prompt and settings. `nai redact IMAGE --region rect:x1,y1,x2,y2` pixelates part of it and `nai watermark IMAGE --text TEXT` signs it; both drop the settings too. Copies never replace the source. They take a folder too, with `-r` for the folders inside it, and `-o FOLDER` keeps each copy in its subfolder.
+- Before the user shares an image, `nai strip IMAGE` saves a copy without its prompt and settings. `nai redact IMAGE --region rect:x1,y1,x2,y2` pixelates part of it and `nai watermark IMAGE --text TEXT` signs it; both drop the settings too. Copies never replace the source. They take a folder too, with `-r` for the folders inside it, and `-o FOLDER` keeps each copy in its subfolder. `--rename` names copies by date and number instead, which leaves out the prompt and seed that NovelAI's own file names carry.
 - `nai tool pixel-snap IMAGE` turns AI pixel art into clean pixels, one per cell, for free; add `--upscale` for a viewable size.
 - A prompt written for ComfyUI with `COUPLE`, `AND ... MASK(...)` or `|` lines splits into characters with `--comfyui-characters`.
 - With the local extra installed (`nai local` shows it), `--region object:x,y` masks the object under a point for `inpaint` and `redact`, and `nai interrogate IMAGE` reads an image's tags into a prompt.
