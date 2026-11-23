@@ -20,6 +20,7 @@ LAYERS = [
         "presets",
         "meta",
         "rerun",
+        "stealth",
         "vibe",
         "inpaint",
         "enhance",

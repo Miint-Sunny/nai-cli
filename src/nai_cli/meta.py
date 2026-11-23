@@ -4,7 +4,6 @@ import io
 import json
 import math
 import struct
-import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -12,12 +11,11 @@ from typing import Any, TypeVar
 
 from PIL import Image
 
-from nai_cli import decode, errors, presets, values
+from nai_cli import decode, errors, images, presets, stealth, values
 from nai_cli import prompt as P
 from nai_cli import request as R
 from nai_cli.models import CFG_RESCALE_RANGE, MAX_SEED, MAX_STEPS, MODELS, Model, resolve
 
-_STEALTH_MAGIC = {b"stealth_pnginfo": False, decode.STEALTH_COMPRESSED: True}
 _EXIF_IFD = 0x8769
 T = TypeVar("T")
 _USER_COMMENT = 0x9286
@@ -86,48 +84,14 @@ def png_text_chunks(data: bytes) -> dict[str, str]:
 
 
 def stealth_text(img: Image.Image) -> dict[str, str]:
-    """Read alpha LSBs column-major: magic, 32-bit length in bits, payload."""
-    if "A" not in img.getbands() or img.width * img.height > decode.STEALTH_MAX_PIXELS:
-        return {}
-    alpha = img.getchannel("A")
-    width, height = alpha.size
-    pixels = alpha.load()
-
-    def bits():
-        for x in range(width):
-            for y in range(height):
-                yield pixels[x, y] & 1
-
-    stream = bits()
-
-    def read_bytes(n: int) -> bytes | None:
-        out = bytearray()
-        for _ in range(n):
-            byte = 0
-            for _ in range(8):
-                bit = next(stream, None)
-                if bit is None:
-                    return None
-                byte = (byte << 1) | bit
-            out.append(byte)
-        return bytes(out)
-
-    magic = read_bytes(len(b"stealth_pnginfo"))
-    if magic not in _STEALTH_MAGIC:
-        return {}
-    length_bytes = read_bytes(4)
-    if length_bytes is None:
-        return {}
-    (bit_length,) = struct.unpack(">I", length_bytes)
-    if bit_length <= 0 or bit_length > width * height - (len(magic) + 4) * 8:
-        return {}
-    payload = read_bytes(-(-bit_length // 8))
-    if payload is None:
+    """The settings hidden in the image's lowest bits, in its alpha channel or its colours, as NovelAI and the
+    stealth pnginfo tools write them; images past the pixel limit are skipped, as the official reader does."""
+    block = stealth.find(images.rgb_or_rgba(img), decode.STEALTH_MAX_PIXELS)
+    if block is None:
         return {}
     try:
-        text = decode.inflate(payload, decode.GZIP) if _STEALTH_MAGIC[magic] else payload
-        parsed = values.parse_json(text.decode("utf-8"))
-    except (OSError, ValueError, EOFError, zlib.error):
+        parsed = values.parse_json(block.data.decode("utf-8"))
+    except ValueError:
         return {}
     if isinstance(parsed, dict):
         return {k: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) for k, v in parsed.items()}

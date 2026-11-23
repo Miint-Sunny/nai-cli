@@ -1,12 +1,13 @@
 """Images as the requests send them: opened, converted, resized for import, masked and stripped."""
 
 import io
+import math
 from collections.abc import Collection
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageSequence
 
-from nai_cli import decode, errors, presets, resample
+from nai_cli import decode, errors, presets, resample, stealth
 from nai_cli.presets import GRID, MAX_PIXELS, nearest_grid
 
 LATENT_SCALE = 8
@@ -33,7 +34,7 @@ def to_png(img: Image.Image) -> bytes:
         # Pillow stores I as 16 bits but no longer takes it as is; I;16 writes the same file
         img = img.convert("I;16")
     elif img.mode not in _PNG_MODES:
-        img = _rgb_or_rgba(img)
+        img = rgb_or_rgba(img)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -91,31 +92,13 @@ def import_size(width: int, height: int, current: tuple[int, int]) -> tuple[int,
 
 
 def clear_stealth_alpha(img: Image.Image) -> Image.Image:
-    """For images carrying stealth data, alpha 254 becomes 255 and 1 becomes 0 so the bits do not show as noise."""
-    if img.width * img.height > decode.STEALTH_MAX_PIXELS or not _has_compressed_stealth(img):
+    """For images carrying stealth data in their alpha channel, alpha 254 becomes 255 and 1 becomes 0, so the bits
+    do not show as noise."""
+    if not stealth.begins_in_alpha(img, decode.STEALTH_MAX_PIXELS):
         return img
     out = img.copy()
     out.putalpha(img.getchannel("A").point(lambda v: 255 if v == 254 else 0 if v == 1 else v))
     return out
-
-
-def _has_compressed_stealth(img: Image.Image) -> bool:
-    """Detect stealth_pngcomp: alpha LSBs read column-major start with the magic."""
-    if "A" not in img.getbands():
-        return False
-    alpha = img.getchannel("A")
-    width, height = alpha.size
-    if width * height < 8 * len(decode.STEALTH_COMPRESSED):
-        return False
-    pixels = alpha.load()
-    for i, expected in enumerate(decode.STEALTH_COMPRESSED):
-        value = 0
-        for bit in range(8):
-            index = 8 * i + bit
-            value |= (pixels[index // height, index % height] & 1) << (7 - bit)
-        if value != expected:
-            return False
-    return True
 
 
 def source_image(path: str | Path, width: int, height: int, keep_alpha: bool) -> bytes:
@@ -124,7 +107,7 @@ def source_image(path: str | Path, width: int, height: int, keep_alpha: bool) ->
 
 
 def clean_source(img: Image.Image) -> Image.Image:
-    return clear_stealth_alpha(_rgb_or_rgba(img))
+    return clear_stealth_alpha(rgb_or_rgba(img))
 
 
 def source_canvas(img: Image.Image, width: int, height: int, keep_alpha: bool) -> Image.Image:
@@ -158,12 +141,13 @@ def mask_request(latent: Image.Image, width: int, height: int) -> bytes:
 
 def tool_image(img: Image.Image) -> tuple[bytes, int, int]:
     """Director tool input, scaled to roughly 1 to 3 megapixels."""
-    img = _rgb_or_rgba(img)
+    img = rgb_or_rgba(img)
     width, height = presets.tool_request_size(img.width, img.height)
     return to_png(resample.lanczos(img, width, height)), width, height
 
 
-def _rgb_or_rgba(img: Image.Image) -> Image.Image:
+def rgb_or_rgba(img: Image.Image) -> Image.Image:
+    """img as RGB, or as RGBA when it has an alpha channel; any other mode is converted to one of them."""
     if img.mode in ("RGB", "RGBA"):
         return img
     return img.convert("RGBA" if "A" in img.getbands() or "transparency" in img.info else "RGB")
@@ -246,5 +230,9 @@ def _bare(img: Image.Image) -> Image.Image:
         img.putalpha(img.getchannel("A").point(lambda v: 255 if v >= 254 else 0 if v <= 1 else v & 0xFE))
     elif img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
+    # Other tools hide settings in the colours, which are the picture itself, so only the bits they take are cleared
+    searched = rgb_or_rgba(img)
+    if (block := stealth.find(searched, math.inf)) is not None:
+        img = stealth.clear(searched, block)
     # A new image carries none of the source's info, which Pillow would otherwise write back
     return Image.frombytes(img.mode, img.size, img.tobytes())

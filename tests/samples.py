@@ -1,5 +1,6 @@
 """Images made with settings in them, damaged or oversized ones, pixel art and Vibe entries, shared by the tests."""
 
+import gzip
 import hashlib
 import io
 import json
@@ -104,6 +105,60 @@ def with_comment(path, comment):
     info.add_text("Comment", comment)
     Image.new("RGB", (8, 8)).save(path, pnginfo=info)
     return path
+
+
+def settings(prompt="1girl, smile", **comment) -> dict[str, str]:
+    """The settings of a NovelAI image as its text keeps them: six fields as text, Comment as JSON."""
+    comment = {
+        "prompt": prompt,
+        "uc": "lowres",
+        "seed": 5,
+        "width": 64,
+        "height": 64,
+        "steps": 28,
+        "scale": 4.0,
+        "sampler": "k_euler_ancestral",
+        "signed_hash": "SIGNATURE",
+        **comment,
+    }
+    return {
+        "Title": "NovelAI generated image",
+        "Description": prompt,
+        "Software": "NovelAI",
+        "Source": "NovelAI Diffusion V5 0ADF9AB7",
+        "Generation time": "6.6",
+        "Comment": json.dumps(comment),
+    }
+
+
+def stealth_payload(settings: dict[str, str], magic: bytes = b"stealth_pngcomp") -> bytes:
+    """settings as they are hidden in an image's lowest bits: every field but Title as JSON, gzipped where the
+    magic says so, behind the magic and the length in bits, and in the alpha channel before the mark that says no
+    error correction follows."""
+    data = {k: v for k, v in settings.items() if k != "Title"}
+    text = json.dumps(data).encode()
+    packed = gzip.compress(text, mtime=0) if magic.endswith(b"comp") else text
+    tail = b"\xff\xff\xff\xff" if magic.startswith(b"stealth_png") else b""
+    return magic + (len(packed) * 8).to_bytes(4, "big") + packed + tail
+
+
+def in_low_bits(img: Image.Image, payload: bytes, channels: str = "alpha") -> Image.Image:
+    """A copy of img with payload in its lowest bits, column-major as the writers go: the alpha channel's, one bit
+    a pixel, or those of red, green and blue, three bits a pixel."""
+    arr = np.array(img.convert("RGBA" if channels == "alpha" or "A" in img.getbands() else "RGB"))
+    bits = np.unpackbits(np.frombuffer(payload, dtype=np.uint8))
+    height = arr.shape[0]
+    assert len(bits) <= img.width * height * (1 if channels == "alpha" else 3)
+    where = np.arange(len(bits))
+    if channels == "alpha":
+        rows, cols = where % height, where // height
+        arr[rows, cols, 3] = (arr[rows, cols, 3] & 0xFE) | bits
+    else:
+        pixels = where // 3
+        arr[pixels % height, pixels // height, where % 3] = (
+            arr[pixels % height, pixels // height, where % 3] & 0xFE
+        ) | bits
+    return Image.fromarray(arr)
 
 
 def pixel_art(rows, cols, pitch, colors=8, noise=4.0, seed=1):

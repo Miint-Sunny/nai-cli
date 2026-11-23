@@ -10,7 +10,6 @@ from PIL import Image
 # What Pillow raises for a damaged, truncated or oversized image
 BAD_IMAGE = (OSError, ValueError, SyntaxError, struct.error, Image.DecompressionBombError)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-STEALTH_COMPRESSED = b"stealth_pngcomp"
 # The official reader skips stealth data in larger images
 STEALTH_MAX_PIXELS = 0x1000000
 TEXT_CHUNKS = (b"tEXt", b"iTXt", b"zTXt")
